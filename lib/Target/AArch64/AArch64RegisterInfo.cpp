@@ -15,6 +15,7 @@
 #include "AArch64RegisterInfo.h"
 #include "AArch64FrameLowering.h"
 #include "AArch64InstrInfo.h"
+#include "AArch64MachineFunctionInfo.h"
 #include "AArch64Subtarget.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "llvm/ADT/BitVector.h"
@@ -24,7 +25,6 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/IR/Function.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetOptions.h"
@@ -34,12 +34,8 @@ using namespace llvm;
 #define GET_REGINFO_TARGET_DESC
 #include "AArch64GenRegisterInfo.inc"
 
-static cl::opt<bool>
-ReserveX18("aarch64-reserve-x18", cl::Hidden,
-          cl::desc("Reserve X18, making it unavailable as GPR"));
-
-AArch64RegisterInfo::AArch64RegisterInfo(StringRef TargetTriple)
-    : AArch64GenRegisterInfo(AArch64::LR), TT(TargetTriple) {}
+AArch64RegisterInfo::AArch64RegisterInfo(const Triple &TT)
+    : AArch64GenRegisterInfo(AArch64::LR), TT(TT) {}
 
 const MCPhysReg *
 AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
@@ -50,8 +46,28 @@ AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     return CSR_AArch64_NoRegs_SaveList;
   if (MF->getFunction()->getCallingConv() == CallingConv::AnyReg)
     return CSR_AArch64_AllRegs_SaveList;
+  if (MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS)
+    return MF->getInfo<AArch64FunctionInfo>()->isSplitCSR() ?
+           CSR_AArch64_CXX_TLS_Darwin_PE_SaveList :
+           CSR_AArch64_CXX_TLS_Darwin_SaveList;
+  if (MF->getSubtarget<AArch64Subtarget>().getTargetLowering()
+          ->supportSwiftError() &&
+      MF->getFunction()->getAttributes().hasAttrSomewhere(
+          Attribute::SwiftError))
+    return CSR_AArch64_AAPCS_SwiftError_SaveList;
+  if (MF->getFunction()->getCallingConv() == CallingConv::PreserveMost)
+    return CSR_AArch64_RT_MostRegs_SaveList;
   else
     return CSR_AArch64_AAPCS_SaveList;
+}
+
+const MCPhysReg *AArch64RegisterInfo::getCalleeSavedRegsViaCopy(
+    const MachineFunction *MF) const {
+  assert(MF && "Invalid MachineFunction pointer.");
+  if (MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
+      MF->getInfo<AArch64FunctionInfo>()->isSplitCSR())
+    return CSR_AArch64_CXX_TLS_Darwin_ViaCopy_SaveList;
+  return nullptr;
 }
 
 const uint32_t *
@@ -62,6 +78,14 @@ AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
     return CSR_AArch64_NoRegs_RegMask;
   if (CC == CallingConv::AnyReg)
     return CSR_AArch64_AllRegs_RegMask;
+  if (CC == CallingConv::CXX_FAST_TLS)
+    return CSR_AArch64_CXX_TLS_Darwin_RegMask;
+  if (MF.getSubtarget<AArch64Subtarget>().getTargetLowering()
+          ->supportSwiftError() &&
+      MF.getFunction()->getAttributes().hasAttrSomewhere(Attribute::SwiftError))
+    return CSR_AArch64_AAPCS_SwiftError_RegMask;
+  if (CC == CallingConv::PreserveMost)
+    return CSR_AArch64_RT_MostRegs_RegMask;
   else
     return CSR_AArch64_AAPCS_RegMask;
 }
@@ -90,7 +114,7 @@ AArch64RegisterInfo::getThisReturnPreservedMask(const MachineFunction &MF,
 
 BitVector
 AArch64RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
-  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+  const AArch64FrameLowering *TFI = getFrameLowering(MF);
 
   // FIXME: avoid re-calculating this every time.
   BitVector Reserved(getNumRegs());
@@ -104,7 +128,7 @@ AArch64RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     Reserved.set(AArch64::W29);
   }
 
-  if (TT.isOSDarwin() || ReserveX18) {
+  if (MF.getSubtarget<AArch64Subtarget>().isX18Reserved()) {
     Reserved.set(AArch64::X18); // Platform register
     Reserved.set(AArch64::W18);
   }
@@ -119,7 +143,7 @@ AArch64RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
 bool AArch64RegisterInfo::isReservedReg(const MachineFunction &MF,
                                       unsigned Reg) const {
-  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+  const AArch64FrameLowering *TFI = getFrameLowering(MF);
 
   switch (Reg) {
   default:
@@ -131,7 +155,7 @@ bool AArch64RegisterInfo::isReservedReg(const MachineFunction &MF,
     return true;
   case AArch64::X18:
   case AArch64::W18:
-    return TT.isOSDarwin() || ReserveX18;
+    return MF.getSubtarget<AArch64Subtarget>().isX18Reserved();
   case AArch64::FP:
   case AArch64::W29:
     return TFI->hasFP(MF) || TT.isOSDarwin();
@@ -165,7 +189,12 @@ bool AArch64RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
   // large enough that referencing from the FP won't result in things being
   // in range relatively often, we can use a base pointer to allow access
   // from the other direction like the SP normally works.
+  // Furthermore, if both variable sized objects are present, and the
+  // stack needs to be dynamically re-aligned, the base pointer is the only
+  // reliable way to reference the locals.
   if (MFI->hasVarSizedObjects()) {
+    if (needsStackRealignment(MF))
+      return true;
     // Conservatively estimate whether the negative offset from the frame
     // pointer will be sufficient to reach. If a function has a smallish
     // frame, it's less likely to have lots of spills and callee saved
@@ -173,9 +202,7 @@ bool AArch64RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
     // If it's wrong, we'll materialize the constant and still get to the
     // object; it's just suboptimal. Negative offsets use the unscaled
     // load/store instructions, which have a 9-bit signed immediate.
-    if (MFI->getLocalFrameSize() < 256)
-      return false;
-    return true;
+    return MFI->getLocalFrameSize() >= 256;
   }
 
   return false;
@@ -183,8 +210,7 @@ bool AArch64RegisterInfo::hasBasePointer(const MachineFunction &MF) const {
 
 unsigned
 AArch64RegisterInfo::getFrameRegister(const MachineFunction &MF) const {
-  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
-
+  const AArch64FrameLowering *TFI = getFrameLowering(MF);
   return TFI->hasFP(MF) ? AArch64::FP : AArch64::SP;
 }
 
@@ -215,9 +241,7 @@ bool AArch64RegisterInfo::requiresFrameIndexScavenging(
 bool
 AArch64RegisterInfo::cannotEliminateFrame(const MachineFunction &MF) const {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
-  // Only consider eliminating leaf frames.
-  if (MFI->hasCalls() || (MF.getTarget().Options.DisableFramePointerElim(MF) &&
-                          MFI->adjustsStack()))
+  if (MF.getTarget().Options.DisableFramePointerElim(MF) && MFI->adjustsStack())
     return true;
   return MFI->hasVarSizedObjects() || MFI->isFrameAddressTaken();
 }
@@ -250,7 +274,7 @@ bool AArch64RegisterInfo::needsFrameBaseReg(MachineInstr *MI,
   // Note that the incoming offset is based on the SP value at function entry,
   // so it'll be negative.
   MachineFunction &MF = *MI->getParent()->getParent();
-  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+  const AArch64FrameLowering *TFI = getFrameLowering(MF);
   MachineFrameInfo *MFI = MF.getFrameInfo();
 
   // Estimate an offset from the frame pointer.
@@ -271,7 +295,7 @@ bool AArch64RegisterInfo::needsFrameBaseReg(MachineInstr *MI,
   // The FP is only available if there is no dynamic realignment. We
   // don't know for sure yet whether we'll need that, so we guess based
   // on whether there are any local variables that would trigger it.
-  if (TFI->hasFP(MF) && isFrameOffsetLegal(MI, FPOffset))
+  if (TFI->hasFP(MF) && isFrameOffsetLegal(MI, AArch64::FP, FPOffset))
     return false;
 
   // If we can reference via the stack pointer or base pointer, try that.
@@ -279,7 +303,7 @@ bool AArch64RegisterInfo::needsFrameBaseReg(MachineInstr *MI,
   //        to only disallow SP relative references in the live range of
   //        the VLA(s). In practice, it's unclear how much difference that
   //        would make, but it may be worth doing.
-  if (isFrameOffsetLegal(MI, Offset))
+  if (isFrameOffsetLegal(MI, AArch64::SP, Offset))
     return false;
 
   // The offset likely isn't legal; we want to allocate a virtual base register.
@@ -287,6 +311,7 @@ bool AArch64RegisterInfo::needsFrameBaseReg(MachineInstr *MI,
 }
 
 bool AArch64RegisterInfo::isFrameOffsetLegal(const MachineInstr *MI,
+                                             unsigned BaseReg,
                                              int64_t Offset) const {
   assert(Offset <= INT_MAX && "Offset too big to fit in int.");
   assert(MI && "Unable to get the legal offset for nil instruction.");
@@ -345,8 +370,7 @@ void AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   MachineFunction &MF = *MBB.getParent();
   const AArch64InstrInfo *TII =
       MF.getSubtarget<AArch64Subtarget>().getInstrInfo();
-  const AArch64FrameLowering *TFI = static_cast<const AArch64FrameLowering *>(
-      MF.getSubtarget().getFrameLowering());
+  const AArch64FrameLowering *TFI = getFrameLowering(MF);
 
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
   unsigned FrameReg;
@@ -380,11 +404,9 @@ void AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   MI.getOperand(FIOperandNum).ChangeToRegister(ScratchReg, false, false, true);
 }
 
-namespace llvm {
-
 unsigned AArch64RegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
                                                   MachineFunction &MF) const {
-  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+  const AArch64FrameLowering *TFI = getFrameLowering(MF);
 
   switch (RC->getID()) {
   default:
@@ -397,10 +419,11 @@ unsigned AArch64RegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
   case AArch64::GPR64RegClassID:
   case AArch64::GPR32commonRegClassID:
   case AArch64::GPR64commonRegClassID:
-    return 32 - 1                                // XZR/SP
-           - (TFI->hasFP(MF) || TT.isOSDarwin()) // FP
-           - (TT.isOSDarwin() || ReserveX18) // X18 reserved as platform register
-           - hasBasePointer(MF);           // X19
+    return 32 - 1                                   // XZR/SP
+              - (TFI->hasFP(MF) || TT.isOSDarwin()) // FP
+              - MF.getSubtarget<AArch64Subtarget>()
+                    .isX18Reserved() // X18 reserved as platform register
+              - hasBasePointer(MF);  // X19
   case AArch64::FPR8RegClassID:
   case AArch64::FPR16RegClassID:
   case AArch64::FPR32RegClassID:
@@ -420,5 +443,3 @@ unsigned AArch64RegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
     return 16;
   }
 }
-
-} // namespace llvm

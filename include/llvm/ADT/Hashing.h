@@ -52,7 +52,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
-#include <iterator>
+#include <string>
 #include <utility>
 
 namespace llvm {
@@ -75,7 +75,7 @@ class hash_code {
 public:
   /// \brief Default construct a hash_code.
   /// Note that this leaves the value uninitialized.
-  hash_code() {}
+  hash_code() = default;
 
   /// \brief Form a hash code directly from a numerical value.
   hash_code(size_t value) : value(value) {}
@@ -631,7 +631,8 @@ inline hash_code hash_integer_value(uint64_t value) {
 template <typename T>
 typename std::enable_if<is_integral_or_enum<T>::value, hash_code>::type
 hash_value(T value) {
-  return ::llvm::hashing::detail::hash_integer_value(value);
+  return ::llvm::hashing::detail::hash_integer_value(
+      static_cast<uint64_t>(value));
 }
 
 // Declared and documented above, but defined here so that any of the hashing

@@ -16,9 +16,9 @@
 
 #include "ManagedStringPool.h"
 #include "NVPTXSubtarget.h"
+#include "llvm/CodeGen/SelectionDAGTargetInfo.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetSelectionDAGInfo.h"
 
 namespace llvm {
 
@@ -34,12 +34,16 @@ class NVPTXTargetMachine : public LLVMTargetMachine {
   ManagedStringPool ManagedStrPool;
 
 public:
-  NVPTXTargetMachine(const Target &T, StringRef TT, StringRef CPU, StringRef FS,
-                     const TargetOptions &Options, Reloc::Model RM,
-                     CodeModel::Model CM, CodeGenOpt::Level OP, bool is64bit);
+  NVPTXTargetMachine(const Target &T, const Triple &TT, StringRef CPU,
+                     StringRef FS, const TargetOptions &Options,
+                     Optional<Reloc::Model> RM, CodeModel::Model CM,
+                     CodeGenOpt::Level OP, bool is64bit);
 
   ~NVPTXTargetMachine() override;
-  const NVPTXSubtarget *getSubtargetImpl() const override { return &Subtarget; }
+  const NVPTXSubtarget *getSubtargetImpl(const Function &) const override {
+    return &Subtarget;
+  }
+  const NVPTXSubtarget *getSubtargetImpl() const { return &Subtarget; }
   bool is64Bit() const { return is64bit; }
   NVPTX::DrvInterface getDrvInterface() const { return drvInterface; }
   ManagedStringPool *getManagedStrPool() const {
@@ -49,7 +53,7 @@ public:
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 
   // Emission of machine code through MCJIT is not supported.
-  bool addPassesToEmitMC(PassManagerBase &, MCContext *&, raw_ostream &,
+  bool addPassesToEmitMC(PassManagerBase &, MCContext *&, raw_pwrite_stream &,
                          bool = true) override {
     return true;
   }
@@ -57,6 +61,7 @@ public:
     return TLOF.get();
   }
 
+  void addEarlyAsPossiblePasses(PassManagerBase &PM) override;
   TargetIRAnalysis getTargetIRAnalysis() override;
 
 }; // NVPTXTargetMachine.
@@ -64,18 +69,18 @@ public:
 class NVPTXTargetMachine32 : public NVPTXTargetMachine {
   virtual void anchor();
 public:
-  NVPTXTargetMachine32(const Target &T, StringRef TT, StringRef CPU,
+  NVPTXTargetMachine32(const Target &T, const Triple &TT, StringRef CPU,
                        StringRef FS, const TargetOptions &Options,
-                       Reloc::Model RM, CodeModel::Model CM,
+                       Optional<Reloc::Model> RM, CodeModel::Model CM,
                        CodeGenOpt::Level OL);
 };
 
 class NVPTXTargetMachine64 : public NVPTXTargetMachine {
   virtual void anchor();
 public:
-  NVPTXTargetMachine64(const Target &T, StringRef TT, StringRef CPU,
+  NVPTXTargetMachine64(const Target &T, const Triple &TT, StringRef CPU,
                        StringRef FS, const TargetOptions &Options,
-                       Reloc::Model RM, CodeModel::Model CM,
+                       Optional<Reloc::Model> RM, CodeModel::Model CM,
                        CodeGenOpt::Level OL);
 };
 

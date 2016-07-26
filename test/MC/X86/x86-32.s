@@ -79,7 +79,7 @@
 // CHECK: movl	%eax, -16(%ebp)          # encoding: [0x89,0x45,0xf0]
 	movl	%eax, -16(%ebp)
 
-// CHECK: testb	%bl, %cl                # encoding: [0x84,0xcb]
+// CHECK: testb	%bl, %cl                # encoding: [0x84,0xd9]
         testb %bl, %cl
 
 // CHECK: cmpl	%eax, %ebx              # encoding: [0x39,0xc3]
@@ -593,6 +593,55 @@ popfl
 	setnaeb	%bl // CHECK: setb %bl
 
 
+// PR8114
+
+out	%al, (%dx)
+// CHECK: outb	%al, %dx
+outb	%al, (%dx)
+// CHECK: outb	%al, %dx
+out	%ax, (%dx)
+// CHECK: outw	%ax, %dx
+outw	%ax, (%dx)
+// CHECK: outw	%ax, %dx
+out	%eax, (%dx)
+// CHECK: outl	%eax, %dx
+outl	%eax, (%dx)
+// CHECK: outl	%eax, %dx
+
+
+in	(%dx), %al
+// CHECK: inb	%dx, %al
+inb	(%dx), %al
+// CHECK: inb	%dx, %al
+in	(%dx), %ax
+// CHECK: inw	%dx, %ax
+inw	(%dx), %ax
+// CHECK: inw	%dx, %ax
+in	(%dx), %eax
+// CHECK: inl	%dx, %eax
+inl	(%dx), %eax
+// CHECK: inl	%dx, %eax
+
+//PR15455
+
+outs	(%esi), (%dx)
+// CHECK: outsw	(%esi), %dx
+outsb	(%esi), (%dx)
+// CHECK: outsb	(%esi), %dx
+outsw	(%esi), (%dx)
+// CHECK: outsw	(%esi), %dx
+outsl	(%esi), (%dx)
+// CHECK: outsl	(%esi), %dx
+
+ins 	(%dx), %es:(%edi)
+// CHECK: insw	%dx, %es:(%edi)
+insb	(%dx), %es:(%edi)
+// CHECK: insb	%dx, %es:(%edi)
+insw	(%dx), %es:(%edi)
+// CHECK: insw	%dx, %es:(%edi)
+insl	(%dx), %es:(%edi)
+// CHECK: insl	%dx, %es:(%edi)	
+	
 // CHECK: lcalll	$31438, $31438
 // CHECK: lcalll	$31438, $31438
 // CHECK: ljmpl	$31438, $31438

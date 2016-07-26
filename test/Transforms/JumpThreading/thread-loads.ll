@@ -1,4 +1,5 @@
 ; RUN: opt < %s -jump-threading -S | FileCheck %s
+; RUN: opt < %s -passes=jump-threading -S | FileCheck %s
 
 target datalayout = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:32:64-v64:64:64-v128:128:128-a0:0:64-f80:128:128"
 target triple = "i386-apple-darwin7"
@@ -8,7 +9,7 @@ target triple = "i386-apple-darwin7"
 define i32 @test1(i32* %P) nounwind {
 ; CHECK-LABEL: @test1(
 entry:
-	%0 = tail call i32 (...)* @f1() nounwind		; <i32> [#uses=1]
+	%0 = tail call i32 (...) @f1() nounwind		; <i32> [#uses=1]
 	%1 = icmp eq i32 %0, 0		; <i1> [#uses=1]
 	br i1 %1, label %bb1, label %bb
 
@@ -26,7 +27,7 @@ bb1:		; preds = %entry, %bb
 	br i1 %3, label %bb3, label %bb2
 
 bb2:		; preds = %bb1
-	%4 = tail call i32 (...)* @f2() nounwind		; <i32> [#uses=0]
+	%4 = tail call i32 (...) @f2() nounwind		; <i32> [#uses=0]
 	ret i32 %res.0
 
 bb3:		; preds = %bb1
@@ -47,7 +48,7 @@ declare i32 @f2(...)
 define i32 @test2(i32* %P) nounwind {
 ; CHECK-LABEL: @test2(
 entry:
-	%0 = tail call i32 (...)* @f1() nounwind		; <i32> [#uses=1]
+	%0 = tail call i32 (...) @f1() nounwind		; <i32> [#uses=1]
 	%1 = icmp eq i32 %0, 0		; <i1> [#uses=1]
 	br i1 %1, label %bb1, label %bb
 
@@ -65,7 +66,7 @@ bb1:		; preds = %entry, %bb
 	br i1 %3, label %bb3, label %bb2
 
 bb2:		; preds = %bb1
-	%4 = tail call i32 (...)* @f2() nounwind
+	%4 = tail call i32 (...) @f2() nounwind
 	ret i32 %res.0
 
 bb3:		; preds = %bb1
@@ -104,6 +105,145 @@ if.then60:
 
 return:
   ret i32 13
+}
+
+define i32 @test4(i32* %P) {
+; CHECK-LABEL: @test4(
+entry:
+  %v0 = tail call i32 (...) @f1()
+  %v1 = icmp eq i32 %v0, 0
+  br i1 %v1, label %bb1, label %bb
+
+bb:
+; CHECK: bb1.thread:
+; CHECK: store atomic
+; CHECK: br label %bb3
+  store atomic i32 42, i32* %P unordered, align 4
+  br label %bb1
+
+bb1:
+; CHECK: bb1:
+; CHECK-NOT: phi
+; CHECK: load atomic
+  %res.0 = phi i32 [ 1, %bb ], [ 0, %entry ]
+  %v2 = load atomic i32, i32* %P unordered, align 4
+  %v3 = icmp sgt i32 %v2, 36
+  br i1 %v3, label %bb3, label %bb2
+
+bb2:
+  %v4 = tail call i32 (...) @f2()
+  ret i32 %res.0
+
+bb3:
+  ret i32 %res.0
+}
+
+define i32 @test5(i32* %P) {
+; Negative test
+
+; CHECK-LABEL: @test5(
+entry:
+  %v0 = tail call i32 (...) @f1()
+  %v1 = icmp eq i32 %v0, 0
+  br i1 %v1, label %bb1, label %bb
+
+bb:
+; CHECK: bb:
+; CHECK-NEXT:   store atomic i32 42, i32* %P release, align 4
+; CHECK-NEXT:   br label %bb1
+  store atomic i32 42, i32* %P release, align 4
+  br label %bb1
+
+bb1:
+; CHECK: bb1:
+; CHECK-NEXT:  %res.0 = phi i32 [ 1, %bb ], [ 0, %entry ]
+; CHECK-NEXT:  %v2 = load atomic i32, i32* %P acquire, align 4
+; CHECK-NEXT:  %v3 = icmp sgt i32 %v2, 36
+; CHECK-NEXT:  br i1 %v3, label %bb3, label %bb2
+
+  %res.0 = phi i32 [ 1, %bb ], [ 0, %entry ]
+  %v2 = load atomic i32, i32* %P acquire, align 4
+  %v3 = icmp sgt i32 %v2, 36
+  br i1 %v3, label %bb3, label %bb2
+
+bb2:
+  %v4 = tail call i32 (...) @f2()
+  ret i32 %res.0
+
+bb3:
+  ret i32 %res.0
+}
+
+define i32 @test6(i32* %P) {
+; Negative test
+
+; CHECK-LABEL: @test6(
+entry:
+  %v0 = tail call i32 (...) @f1()
+  %v1 = icmp eq i32 %v0, 0
+  br i1 %v1, label %bb1, label %bb
+
+bb:
+; CHECK: bb:
+; CHECK-NEXT:   store i32 42, i32* %P
+; CHECK-NEXT:   br label %bb1
+  store i32 42, i32* %P
+  br label %bb1
+
+bb1:
+; CHECK: bb1:
+; CHECK-NEXT:  %res.0 = phi i32 [ 1, %bb ], [ 0, %entry ]
+; CHECK-NEXT:  %v2 = load atomic i32, i32* %P acquire, align 4
+; CHECK-NEXT:  %v3 = icmp sgt i32 %v2, 36
+; CHECK-NEXT:  br i1 %v3, label %bb3, label %bb2
+
+  %res.0 = phi i32 [ 1, %bb ], [ 0, %entry ]
+  %v2 = load atomic i32, i32* %P acquire, align 4
+  %v3 = icmp sgt i32 %v2, 36
+  br i1 %v3, label %bb3, label %bb2
+
+bb2:
+  %v4 = tail call i32 (...) @f2()
+  ret i32 %res.0
+
+bb3:
+  ret i32 %res.0
+}
+
+define i32 @test7(i32* %P) {
+; Negative test
+
+; CHECK-LABEL: @test7(
+entry:
+  %v0 = tail call i32 (...) @f1()
+  %v1 = icmp eq i32 %v0, 0
+  br i1 %v1, label %bb1, label %bb
+
+bb:
+; CHECK: bb:
+; CHECK-NEXT:   %val = load i32, i32* %P
+; CHECK-NEXT:   br label %bb1
+  %val = load i32, i32* %P
+  br label %bb1
+
+bb1:
+; CHECK: bb1:
+; CHECK-NEXT:  %res.0 = phi i32 [ 1, %bb ], [ 0, %entry ]
+; CHECK-NEXT:  %v2 = load atomic i32, i32* %P acquire, align 4
+; CHECK-NEXT:  %v3 = icmp sgt i32 %v2, 36
+; CHECK-NEXT:  br i1 %v3, label %bb3, label %bb2
+
+  %res.0 = phi i32 [ 1, %bb ], [ 0, %entry ]
+  %v2 = load atomic i32, i32* %P acquire, align 4
+  %v3 = icmp sgt i32 %v2, 36
+  br i1 %v3, label %bb3, label %bb2
+
+bb2:
+  %v4 = tail call i32 (...) @f2()
+  ret i32 %res.0
+
+bb3:
+  ret i32 %res.0
 }
 
 !0 = !{!3, !3, i64 0}

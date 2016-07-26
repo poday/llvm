@@ -1,4 +1,5 @@
 ; RUN: opt -loop-accesses -analyze < %s | FileCheck %s
+; RUN: opt -passes='require<scalar-evolution>,require<aa>,loop(print-access-info)' -disable-output < %s  2>&1 | FileCheck %s
 
 ; In this loop just because we access A through different types (int, float)
 ; we still have a dependence cycle:
@@ -14,7 +15,6 @@ target triple = "x86_64-apple-macosx10.10.0"
 ; CHECK: Report: unsafe dependent memory operations in loop
 ; CHECK-NOT: Memory dependences are safe
 
-@n = global i32 20, align 4
 @B = common global i32* null, align 8
 @A = common global i32* null, align 8
 

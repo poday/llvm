@@ -19,7 +19,7 @@
 ; reusing the pre-addition register later, or the post-addition one. Currently,
 ; it does the latter, so we check:
 
-; CHECK: # %while.body85.i
+; CHECK: # %while.body85.i{{$}}
 ; CHECK-NOT: # %
 ; CHECK-NOT: add
 ; CHECK: movl %[[POSTR:e[abcdxi]+]], %[[PRER:e[abcdxi]+]]
@@ -144,7 +144,7 @@ if.end117.i:                                      ; preds = %if.then108.i, %land
   br i1 undef, label %if.then122.i, label %for.cond138.preheader.i
 
 if.then122.i:                                     ; preds = %if.end117.i
-  call void (...)* @fprintf(i32 undef, i32 %gs.0526.i, i32 %ge.1.i, i32 %aFreq.1.i, double undef) nounwind
+  call void (...) @fprintf(i32 undef, i32 %gs.0526.i, i32 %ge.1.i, i32 %aFreq.1.i, double undef) nounwind
   br label %for.cond138.preheader.i
 
 for.cond138.preheader.i:                          ; preds = %if.then122.i, %if.end117.i

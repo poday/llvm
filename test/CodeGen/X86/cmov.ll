@@ -108,7 +108,7 @@ func_1.exit:                                      ; preds = %bb.i.i, %func_4.exi
   %g_96.tmp.0.i = phi i8 [ %g_96.promoted.i, %bb.i.i ], [ %.mux.i, %func_4.exit.i ] ; <i8> [#uses=2]
   store i8 %g_96.tmp.0.i, i8* @g_96
   %6 = zext i8 %g_96.tmp.0.i to i32               ; <i32> [#uses=1]
-  %7 = tail call i32 (i8*, ...)* @printf(i8* noalias getelementptr ([15 x i8], [15 x i8]* @_2E_str, i64 0, i64 0), i32 %6) nounwind ; <i32> [#uses=0]
+  %7 = tail call i32 (i8*, ...) @printf(i8* noalias getelementptr ([15 x i8], [15 x i8]* @_2E_str, i64 0, i64 0), i32 %6) nounwind ; <i32> [#uses=0]
   ret i32 0
 }
 
@@ -120,8 +120,8 @@ declare i32 @printf(i8* nocapture, ...) nounwind
 define i32 @test5(i32* nocapture %P) nounwind readonly {
 entry:
 ; CHECK-LABEL: test5:
+; CHECK:  xorl %eax, %eax
 ; CHECK: 	setg	%al
-; CHECK:	movzbl	%al, %eax
 ; CHECK:	orl	$-2, %eax
 ; CHECK:	ret
 
@@ -134,8 +134,8 @@ entry:
 define i32 @test6(i32* nocapture %P) nounwind readonly {
 entry:
 ; CHECK-LABEL: test6:
+; CHECK:  xorl %eax, %eax
 ; CHECK: 	setl	%al
-; CHECK:	movzbl	%al, %eax
 ; CHECK:	leal	4(%rax,%rax,8), %eax
 ; CHECK:        ret
 	%0 = load i32, i32* %P, align 4		; <i32> [#uses=1]

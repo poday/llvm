@@ -37,9 +37,6 @@ public:
 private:
   typedef typename BaseLayerT::ObjSetHandleT ObjSetHandleT;
 
-  typedef std::vector<std::unique_ptr<object::ObjectFile>> OwningObjectVec;
-  typedef std::vector<std::unique_ptr<MemoryBuffer>> OwningBufferVec;
-
 public:
   /// @brief Handle to a set of compiled modules.
   typedef ObjSetHandleT ModuleSetHandleT;
@@ -52,38 +49,39 @@ public:
   /// @brief Set an ObjectCache to query before compiling.
   void setObjectCache(ObjectCache *NewCache) { ObjCache = NewCache; }
 
-  /// @brief Compile each module in the given module set, then then add the
-  ///        resulting set of objects to the base layer, along with the memory
-  //         manager MM.
+  /// @brief Compile each module in the given module set, then add the resulting
+  ///        set of objects to the base layer along with the memory manager and
+  ///        symbol resolver.
   ///
   /// @return A handle for the added modules.
-  template <typename ModuleSetT>
+  template <typename ModuleSetT, typename MemoryManagerPtrT,
+            typename SymbolResolverPtrT>
   ModuleSetHandleT addModuleSet(ModuleSetT Ms,
-                                std::unique_ptr<RTDyldMemoryManager> MM) {
-    OwningObjectVec Objects;
-    OwningBufferVec Buffers;
+                                MemoryManagerPtrT MemMgr,
+                                SymbolResolverPtrT Resolver) {
+    std::vector<std::unique_ptr<object::OwningBinary<object::ObjectFile>>>
+      Objects;
 
     for (const auto &M : Ms) {
-      std::unique_ptr<object::ObjectFile> Object;
-      std::unique_ptr<MemoryBuffer> Buffer;
+      auto Object =
+        llvm::make_unique<object::OwningBinary<object::ObjectFile>>();
 
       if (ObjCache)
-        std::tie(Object, Buffer) = tryToLoadFromObjectCache(*M).takeBinary();
+        *Object = tryToLoadFromObjectCache(*M);
 
-      if (!Object) {
-        std::tie(Object, Buffer) = Compile(*M).takeBinary();
+      if (!Object->getBinary()) {
+        *Object = Compile(*M);
         if (ObjCache)
-          ObjCache->notifyObjectCompiled(&*M, Buffer->getMemBufferRef());
+          ObjCache->notifyObjectCompiled(&*M,
+                                     Object->getBinary()->getMemoryBufferRef());
       }
 
       Objects.push_back(std::move(Object));
-      Buffers.push_back(std::move(Buffer));
     }
 
     ModuleSetHandleT H =
-      BaseLayer.addObjectSet(Objects, std::move(MM));
-
-    BaseLayer.takeOwnershipOfBuffers(H, std::move(Buffers));
+      BaseLayer.addObjectSet(std::move(Objects), std::move(MemMgr),
+                             std::move(Resolver));
 
     return H;
   }
@@ -126,10 +124,13 @@ private:
     if (!ObjBuffer)
       return object::OwningBinary<object::ObjectFile>();
 
-    ErrorOr<std::unique_ptr<object::ObjectFile>> Obj =
+    Expected<std::unique_ptr<object::ObjectFile>> Obj =
         object::ObjectFile::createObjectFile(ObjBuffer->getMemBufferRef());
-    if (!Obj)
+    if (!Obj) {
+      // TODO: Actually report errors helpfully.
+      consumeError(Obj.takeError());
       return object::OwningBinary<object::ObjectFile>();
+    }
 
     return object::OwningBinary<object::ObjectFile>(std::move(*Obj),
                                                     std::move(ObjBuffer));

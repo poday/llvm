@@ -8,11 +8,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Dwarf.h"
-#include "llvm/Support/LEB128.h"
 #include "llvm/Support/Host.h"
+#include "llvm/Support/LEB128.h"
 #include "gtest/gtest.h"
+#include <climits>
 using namespace llvm;
 using namespace dwarf;
 

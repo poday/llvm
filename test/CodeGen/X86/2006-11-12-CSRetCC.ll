@@ -6,7 +6,14 @@ target triple = "i686-pc-linux-gnu"
 define i32 @main() {
 ; CHECK-LABEL: main:
 ; CHECK-NOT: ret
-; CHECK: subl $4, %{{.*}}
+; CHECK: subl $12, %esp
+; CHECK: pushl
+; CHECK: pushl
+; CHECK: pushl
+; CHECK: pushl
+; CHECK: pushl
+; CHECK: calll cexp
+; CHECK: addl $28, %esp
 ; CHECK: ret
 
 entry:
@@ -51,7 +58,7 @@ entry:
         %tmp20 = getelementptr { double, double }, { double, double }* %z, i64 0, i32 0             ; <double*> [#uses=1]
         %tmp21 = load double, double* %tmp20            ; <double> [#uses=1]
         %tmp.upgrd.6 = getelementptr [9 x i8], [9 x i8]* @str, i32 0, i64 0               ; <i8*> [#uses=1]
-        %tmp.upgrd.7 = call i32 (i8*, ...)* @printf( i8* %tmp.upgrd.6, double %tmp21, double %tmp19 )           ; <i32> [#uses=0]
+        %tmp.upgrd.7 = call i32 (i8*, ...) @printf( i8* %tmp.upgrd.6, double %tmp21, double %tmp19 )           ; <i32> [#uses=0]
         br label %finish
 finish:
         %retval.upgrd.8 = load i32, i32* %retval             ; <i32> [#uses=1]

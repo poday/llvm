@@ -5,6 +5,7 @@
 ; loads and stores.
 
 @var_i32 = global i32 42
+@var2_i32 = global i32 43
 @var_i64 = global i64 0
 
 ; Add pure 12-bit immediates:
@@ -21,6 +22,34 @@ define void @add_small() {
   %newval64 = add i64 %val64, 52
   store i64 %newval64, i64* @var_i64
 
+  ret void
+}
+
+; Make sure we grab the imm variant when the register operand
+; can be implicitly zero-extend.
+; We used to generate something horrible like this:
+; wA = ldrb
+; xB = ldimm 12
+; xC = add xB, wA, uxtb
+; whereas this can be achieved with:
+; wA = ldrb
+; xC = add xA, #12 ; <- xA implicitly zero extend wA.
+define void @add_small_imm(i8* %p, i64* %q, i32 %b, i32* %addr) {
+; CHECK-LABEL: add_small_imm:
+entry:
+
+; CHECK: ldrb w[[LOAD32:[0-9]+]], [x0]
+  %t = load i8, i8* %p
+  %promoted = zext i8 %t to i64
+  %zextt = zext i8 %t to i32
+  %add = add nuw i32 %zextt, %b
+
+; CHECK: add [[ADD2:x[0-9]+]], x[[LOAD32]], #12
+  %add2 = add nuw i64 %promoted, 12
+  store i32 %add, i32* %addr
+
+; CHECK: str [[ADD2]], [x1]
+  store i64 %add2, i64* %q
   ret void
 }
 
@@ -78,6 +107,7 @@ define void @sub_med() {
 define void @testing() {
 ; CHECK-LABEL: testing:
   %val = load i32, i32* @var_i32
+  %val2 = load i32, i32* @var2_i32
 
 ; CHECK: cmp {{w[0-9]+}}, #4095
 ; CHECK: b.ne [[RET:.?LBB[0-9]+_[0-9]+]]
@@ -89,7 +119,7 @@ test2:
 ; CHECK: b.lo [[RET]]
   %newval2 = add i32 %val, 1
   store i32 %newval2, i32* @var_i32
-  %cmp_pos_big = icmp ult i32 %val, 14610432
+  %cmp_pos_big = icmp ult i32 %val2, 14610432
   br i1 %cmp_pos_big, label %ret, label %test3
 
 test3:
@@ -105,7 +135,7 @@ test4:
 ; CHECK: b.gt [[RET]]
   %newval4 = add i32 %val, 3
   store i32 %newval4, i32* @var_i32
-  %cmp_pos_sgt = icmp sgt i32 %val, 321
+  %cmp_pos_sgt = icmp sgt i32 %val2, 321
   br i1 %cmp_pos_sgt, label %ret, label %test5
 
 test5:
@@ -113,7 +143,7 @@ test5:
 ; CHECK: b.gt [[RET]]
   %newval5 = add i32 %val, 4
   store i32 %newval5, i32* @var_i32
-  %cmp_neg_uge = icmp sgt i32 %val, -444
+  %cmp_neg_uge = icmp sgt i32 %val2, -444
   br i1 %cmp_neg_uge, label %ret, label %test6
 
 test6:

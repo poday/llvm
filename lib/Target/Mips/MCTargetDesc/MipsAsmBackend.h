@@ -36,11 +36,12 @@ public:
                  bool Is64Bit)
       : MCAsmBackend(), OSType(OSType), IsLittle(IsLittle), Is64Bit(Is64Bit) {}
 
-  MCObjectWriter *createObjectWriter(raw_ostream &OS) const override;
+  MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const override;
 
   void applyFixup(const MCFixup &Fixup, char *Data, unsigned DataSize,
                   uint64_t Value, bool IsPCRel) const override;
 
+  Optional<MCFixupKind> getFixupKind(StringRef Name) const override;
   const MCFixupKindInfo &getFixupKindInfo(MCFixupKind Kind) const override;
 
   unsigned getNumFixupKinds() const override {
@@ -74,7 +75,8 @@ public:
   /// \param Inst - The instruction to relax, which may be the same
   /// as the output.
   /// \param [out] Res On return, the relaxed instruction.
-  void relaxInstruction(const MCInst &Inst, MCInst &Res) const override {}
+  void relaxInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
+                        MCInst &Res) const override {}
 
   /// @}
 

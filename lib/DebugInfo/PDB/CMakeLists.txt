@@ -9,7 +9,7 @@ if(HAVE_DIA_SDK)
   if (CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(LIBPDB_LINK_FOLDERS "${LIBPDB_LINK_FOLDERS}\\amd64")
   endif()
-  set(LIBPDB_ADDITIONAL_LIBRARIES "${LIBPDB_LINK_FOLDERS}\\diaguids.lib")
+  file(TO_CMAKE_PATH "${LIBPDB_LINK_FOLDERS}\\diaguids.lib" LIBPDB_ADDITIONAL_LIBRARIES)
 
   add_pdb_impl_folder(DIA
     DIA/DIADataStream.cpp
@@ -17,6 +17,7 @@ if(HAVE_DIA_SDK)
     DIA/DIAEnumLineNumbers.cpp
     DIA/DIAEnumSourceFiles.cpp
     DIA/DIAEnumSymbols.cpp
+    DIA/DIAError.cpp
     DIA/DIALineNumber.cpp
     DIA/DIARawSymbol.cpp
     DIA/DIASession.cpp
@@ -24,14 +25,36 @@ if(HAVE_DIA_SDK)
     )
 
     set(LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB/DIA")
-
 endif()
 
+add_pdb_impl_folder(Raw
+  Raw/DbiStream.cpp
+  Raw/DbiStreamBuilder.cpp
+  Raw/EnumTables.cpp
+  Raw/Hash.cpp
+  Raw/InfoStream.cpp
+  Raw/InfoStreamBuilder.cpp
+  Raw/ModInfo.cpp
+  Raw/ModStream.cpp
+  Raw/NameHashTable.cpp
+  Raw/NameMap.cpp
+  Raw/NameMapBuilder.cpp
+  Raw/PDBFile.cpp
+  Raw/PDBFileBuilder.cpp
+  Raw/PublicsStream.cpp
+  Raw/RawError.cpp
+  Raw/RawSession.cpp
+  Raw/SymbolStream.cpp
+  Raw/TpiStream.cpp)
+
+list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB/Raw")
 list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB")
 
 add_llvm_library(LLVMDebugInfoPDB
+  GenericError.cpp
   IPDBSourceFile.cpp
   PDB.cpp
+  PDBContext.cpp
   PDBExtras.cpp
   PDBInterfaceAnchors.cpp
   PDBSymbol.cpp
@@ -73,4 +96,4 @@ add_llvm_library(LLVMDebugInfoPDB
   ${LIBPDB_ADDITIONAL_HEADER_DIRS}
   )
 
-target_link_libraries(LLVMDebugInfoPDB ${cmake_2_8_12_INTERFACE} "${LIBPDB_ADDITIONAL_LIBRARIES}")
+target_link_libraries(LLVMDebugInfoPDB INTERFACE "${LIBPDB_ADDITIONAL_LIBRARIES}")

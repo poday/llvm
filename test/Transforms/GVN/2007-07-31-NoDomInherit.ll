@@ -1,4 +1,4 @@
-; RUN: opt < %s -basicaa -gvn -S | grep "tmp47 = phi i32 "
+; RUN: opt < %s -basicaa -gvn -S | FileCheck %s
 
 	%struct.anon = type { i32 (i32, i32, i32)*, i32, i32, [3 x i32], i8*, i8*, i8* }
 @debug = external constant i32		; <i32*> [#uses=0]
@@ -151,7 +151,7 @@ entry:
 bb:		; preds = %cond_next97
 	%tmp1 = load i32, i32* @numi		; <i32> [#uses=1]
 	%tmp2 = getelementptr [44 x i8], [44 x i8]* @.str43, i32 0, i32 0		; <i8*> [#uses=1]
-	%tmp3 = call i32 (i8*, ...)* @printf( i8* %tmp2, i32 %tmp1 )		; <i32> [#uses=0]
+	%tmp3 = call i32 (i8*, ...) @printf( i8* %tmp2, i32 %tmp1 )		; <i32> [#uses=0]
 	store i32 0, i32* %i
 	br label %bb13
 
@@ -214,6 +214,7 @@ bb18:		; preds = %bb49
 	%tmp46 = load i32, i32* %i		; <i32> [#uses=1]
 	call void @fix_operands( i32 %tmp46 )
 	%tmp47 = load i32, i32* %i		; <i32> [#uses=1]
+; CHECK: %tmp47 = phi i32 [ %tmp48, %bb18 ], [ 0, %bb17 ]
 	%tmp48 = add i32 %tmp47, 1		; <i32> [#uses=1]
 	store i32 %tmp48, i32* %i
 	br label %bb49
@@ -231,7 +232,7 @@ bb55:		; preds = %bb49
 	store i32 %tmp56, i32* %num_sol
 	%tmp57 = getelementptr [21 x i8], [21 x i8]* @.str44, i32 0, i32 0		; <i8*> [#uses=1]
 	%tmp58 = load i32, i32* %num_sol		; <i32> [#uses=1]
-	%tmp59 = call i32 (i8*, ...)* @printf( i8* %tmp57, i32 %tmp58 )		; <i32> [#uses=0]
+	%tmp59 = call i32 (i8*, ...) @printf( i8* %tmp57, i32 %tmp58 )		; <i32> [#uses=0]
 	%tmp60 = load i32, i32* @counters		; <i32> [#uses=1]
 	%tmp61 = icmp ne i32 %tmp60, 0		; <i1> [#uses=1]
 	%tmp6162 = zext i1 %tmp61 to i32		; <i32> [#uses=1]
@@ -241,7 +242,7 @@ bb55:		; preds = %bb49
 cond_true:		; preds = %bb55
 	store i32 0, i32* %total
 	%tmp64 = getelementptr [12 x i8], [12 x i8]* @.str45, i32 0, i32 0		; <i8*> [#uses=1]
-	%tmp65 = call i32 (i8*, ...)* @printf( i8* %tmp64 )		; <i32> [#uses=0]
+	%tmp65 = call i32 (i8*, ...) @printf( i8* %tmp64 )		; <i32> [#uses=0]
 	store i32 0, i32* %i
 	br label %bb79
 
@@ -250,7 +251,7 @@ bb66:		; preds = %bb79
 	%tmp68 = getelementptr [5 x i32], [5 x i32]* @counter, i32 0, i32 %tmp67		; <i32*> [#uses=1]
 	%tmp69 = load i32, i32* %tmp68		; <i32> [#uses=1]
 	%tmp70 = getelementptr [5 x i8], [5 x i8]* @.str46, i32 0, i32 0		; <i8*> [#uses=1]
-	%tmp71 = call i32 (i8*, ...)* @printf( i8* %tmp70, i32 %tmp69 )		; <i32> [#uses=0]
+	%tmp71 = call i32 (i8*, ...) @printf( i8* %tmp70, i32 %tmp69 )		; <i32> [#uses=0]
 	%tmp72 = load i32, i32* %i		; <i32> [#uses=1]
 	%tmp73 = getelementptr [5 x i32], [5 x i32]* @counter, i32 0, i32 %tmp72		; <i32*> [#uses=1]
 	%tmp74 = load i32, i32* %tmp73		; <i32> [#uses=1]
@@ -273,7 +274,7 @@ bb79:		; preds = %bb66, %cond_true
 bb85:		; preds = %bb79
 	%tmp86 = getelementptr [12 x i8], [12 x i8]* @.str47, i32 0, i32 0		; <i8*> [#uses=1]
 	%tmp87 = load i32, i32* %total		; <i32> [#uses=1]
-	%tmp88 = call i32 (i8*, ...)* @printf( i8* %tmp86, i32 %tmp87 )		; <i32> [#uses=0]
+	%tmp88 = call i32 (i8*, ...) @printf( i8* %tmp86, i32 %tmp87 )		; <i32> [#uses=0]
 	br label %cond_next
 
 cond_next:		; preds = %bb85, %bb55

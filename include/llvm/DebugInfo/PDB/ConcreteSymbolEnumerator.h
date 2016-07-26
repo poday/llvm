@@ -15,6 +15,7 @@
 #include <memory>
 
 namespace llvm {
+namespace pdb {
 
 template <typename ChildType>
 class ConcreteSymbolEnumerator : public IPDBEnumChildren<ChildType> {
@@ -22,7 +23,7 @@ public:
   ConcreteSymbolEnumerator(std::unique_ptr<IPDBEnumSymbols> SymbolEnumerator)
       : Enumerator(std::move(SymbolEnumerator)) {}
 
-  virtual ~ConcreteSymbolEnumerator() {}
+  ~ConcreteSymbolEnumerator() override {}
 
   uint32_t getChildCount() const override {
     return Enumerator->getChildCount();
@@ -54,6 +55,7 @@ private:
 
   std::unique_ptr<IPDBEnumSymbols> Enumerator;
 };
+}
 }
 
 #endif

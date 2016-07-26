@@ -15,6 +15,7 @@
 #ifndef LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
 #define LLVM_LIB_TRANSFORMS_INSTCOMBINE_INSTCOMBINEINTERNAL_H
 
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/TargetFolder.h"
@@ -38,17 +39,6 @@ class TargetLibraryInfo;
 class DbgDeclareInst;
 class MemIntrinsic;
 class MemSetInst;
-
-/// \brief Specific patterns of select instructions we can match.
-enum SelectPatternFlavor {
-  SPF_UNKNOWN = 0,
-  SPF_SMIN,
-  SPF_UMIN,
-  SPF_SMAX,
-  SPF_UMAX,
-  SPF_ABS,
-  SPF_NABS
-};
 
 /// \brief Assign a complexity or rank value to LLVM Values.
 ///
@@ -110,10 +100,45 @@ static inline bool IsFreeToInvert(Value *V, bool WillInvertAllUses) {
   return false;
 }
 
+
+/// \brief Specific patterns of overflow check idioms that we match.
+enum OverflowCheckFlavor {
+  OCF_UNSIGNED_ADD,
+  OCF_SIGNED_ADD,
+  OCF_UNSIGNED_SUB,
+  OCF_SIGNED_SUB,
+  OCF_UNSIGNED_MUL,
+  OCF_SIGNED_MUL,
+
+  OCF_INVALID
+};
+
+/// \brief Returns the OverflowCheckFlavor corresponding to a overflow_with_op
+/// intrinsic.
+static inline OverflowCheckFlavor
+IntrinsicIDToOverflowCheckFlavor(unsigned ID) {
+  switch (ID) {
+  default:
+    return OCF_INVALID;
+  case Intrinsic::uadd_with_overflow:
+    return OCF_UNSIGNED_ADD;
+  case Intrinsic::sadd_with_overflow:
+    return OCF_SIGNED_ADD;
+  case Intrinsic::usub_with_overflow:
+    return OCF_UNSIGNED_SUB;
+  case Intrinsic::ssub_with_overflow:
+    return OCF_SIGNED_SUB;
+  case Intrinsic::umul_with_overflow:
+    return OCF_UNSIGNED_MUL;
+  case Intrinsic::smul_with_overflow:
+    return OCF_SIGNED_MUL;
+  }
+}
+
 /// \brief An IRBuilder inserter that adds new instructions to the instcombine
 /// worklist.
 class LLVM_LIBRARY_VISIBILITY InstCombineIRInserter
-    : public IRBuilderDefaultInserter<true> {
+    : public IRBuilderDefaultInserter {
   InstCombineWorklist &Worklist;
   AssumptionCache *AC;
 
@@ -123,7 +148,7 @@ public:
 
   void InsertHelper(Instruction *I, const Twine &Name, BasicBlock *BB,
                     BasicBlock::iterator InsertPt) const {
-    IRBuilderDefaultInserter<true>::InsertHelper(I, Name, BB, InsertPt);
+    IRBuilderDefaultInserter::InsertHelper(I, Name, BB, InsertPt);
     Worklist.Add(I);
 
     using namespace llvm::PatternMatch;
@@ -146,12 +171,16 @@ public:
 
   /// \brief An IRBuilder that automatically inserts new instructions into the
   /// worklist.
-  typedef IRBuilder<true, TargetFolder, InstCombineIRInserter> BuilderTy;
+  typedef IRBuilder<TargetFolder, InstCombineIRInserter> BuilderTy;
   BuilderTy *Builder;
 
 private:
   // Mode in which we are running the combiner.
   const bool MinimizeSize;
+  /// Enable combines that trigger rarely but are costly in compiletime.
+  const bool ExpensiveCombines;
+
+  AliasAnalysis *AA;
 
   // Required analyses.
   // FIXME: These can never be null and should be references.
@@ -168,10 +197,12 @@ private:
 
 public:
   InstCombiner(InstCombineWorklist &Worklist, BuilderTy *Builder,
-               bool MinimizeSize, AssumptionCache *AC, TargetLibraryInfo *TLI,
+               bool MinimizeSize, bool ExpensiveCombines, AliasAnalysis *AA,
+               AssumptionCache *AC, TargetLibraryInfo *TLI,
                DominatorTree *DT, const DataLayout &DL, LoopInfo *LI)
       : Worklist(Worklist), Builder(Builder), MinimizeSize(MinimizeSize),
-        AC(AC), TLI(TLI), DT(DT), DL(DL), LI(LI), MadeIRChange(false) {}
+        ExpensiveCombines(ExpensiveCombines), AA(AA), AC(AC), TLI(TLI), DT(DT),
+        DL(DL), LI(LI), MadeIRChange(false) {}
 
   /// \brief Run the combiner over the entire worklist until it is empty.
   ///
@@ -231,28 +262,8 @@ public:
   Instruction *visitAShr(BinaryOperator &I);
   Instruction *visitLShr(BinaryOperator &I);
   Instruction *commonShiftTransforms(BinaryOperator &I);
-  Instruction *FoldFCmp_IntToFP_Cst(FCmpInst &I, Instruction *LHSI,
-                                    Constant *RHSC);
-  Instruction *FoldCmpLoadFromIndexedGlobal(GetElementPtrInst *GEP,
-                                            GlobalVariable *GV, CmpInst &ICI,
-                                            ConstantInt *AndCst = nullptr);
   Instruction *visitFCmpInst(FCmpInst &I);
   Instruction *visitICmpInst(ICmpInst &I);
-  Instruction *visitICmpInstWithCastAndCast(ICmpInst &ICI);
-  Instruction *visitICmpInstWithInstAndIntCst(ICmpInst &ICI, Instruction *LHS,
-                                              ConstantInt *RHS);
-  Instruction *FoldICmpDivCst(ICmpInst &ICI, BinaryOperator *DivI,
-                              ConstantInt *DivRHS);
-  Instruction *FoldICmpShrCst(ICmpInst &ICI, BinaryOperator *DivI,
-                              ConstantInt *DivRHS);
-  Instruction *FoldICmpCstShrCst(ICmpInst &I, Value *Op, Value *A,
-                                 ConstantInt *CI1, ConstantInt *CI2);
-  Instruction *FoldICmpCstShlCst(ICmpInst &I, Value *Op, Value *A,
-                                 ConstantInt *CI1, ConstantInt *CI2);
-  Instruction *FoldICmpAddOpCst(Instruction &ICI, Value *X, ConstantInt *CI,
-                                ICmpInst::Predicate Pred);
-  Instruction *FoldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
-                           ICmpInst::Predicate Cond, Instruction &I);
   Instruction *FoldShiftByConstant(Value *Op0, Constant *Op1,
                                    BinaryOperator &I);
   Instruction *commonCastTransforms(CastInst &CI);
@@ -298,6 +309,8 @@ public:
   Instruction *visitShuffleVectorInst(ShuffleVectorInst &SVI);
   Instruction *visitExtractValueInst(ExtractValueInst &EV);
   Instruction *visitLandingPadInst(LandingPadInst &LI);
+  Instruction *visitVAStartInst(VAStartInst &I);
+  Instruction *visitVACopyInst(VACopyInst &I);
 
   // visitInstruction - Specify what to return for unhandled instructions...
   Instruction *visitInstruction(Instruction &I) { return nullptr; }
@@ -313,29 +326,62 @@ public:
                                  const unsigned SIOpd);
 
 private:
+  bool ShouldChangeType(unsigned FromBitWidth, unsigned ToBitWidth) const;
   bool ShouldChangeType(Type *From, Type *To) const;
   Value *dyn_castNegVal(Value *V) const;
   Value *dyn_castFNegVal(Value *V, bool NoSignedZero = false) const;
-  Type *FindElementAtOffset(Type *PtrTy, int64_t Offset,
+  Type *FindElementAtOffset(PointerType *PtrTy, int64_t Offset,
                             SmallVectorImpl<Value *> &NewIndices);
   Instruction *FoldOpIntoSelect(Instruction &Op, SelectInst *SI);
 
-  /// \brief Classify whether a cast is worth optimizing.
+  /// Classify whether a cast is worth optimizing.
   ///
-  /// Returns true if the cast from "V to Ty" actually results in any code
-  /// being generated and is interesting to optimize out. If the cast can be
-  /// eliminated by some other simple transformation, we prefer to do the
-  /// simplification first.
-  bool ShouldOptimizeCast(Instruction::CastOps opcode, const Value *V,
-                          Type *Ty);
+  /// This is a helper to decide whether the simplification of
+  /// logic(cast(A), cast(B)) to cast(logic(A, B)) should be performed.
+  ///
+  /// \param CI The cast we are interested in.
+  ///
+  /// \return true if this cast actually results in any code being generated and
+  /// if it cannot already be eliminated by some other transformation.
+  bool shouldOptimizeCast(CastInst *CI);
+
+  /// \brief Try to optimize a sequence of instructions checking if an operation
+  /// on LHS and RHS overflows.
+  ///
+  /// If this overflow check is done via one of the overflow check intrinsics,
+  /// then CtxI has to be the call instruction calling that intrinsic.  If this
+  /// overflow check is done by arithmetic followed by a compare, then CtxI has
+  /// to be the arithmetic instruction.
+  ///
+  /// If a simplification is possible, stores the simplified result of the
+  /// operation in OperationResult and result of the overflow check in
+  /// OverflowResult, and return true.  If no simplification is possible,
+  /// returns false.
+  bool OptimizeOverflowCheck(OverflowCheckFlavor OCF, Value *LHS, Value *RHS,
+                             Instruction &CtxI, Value *&OperationResult,
+                             Constant *&OverflowResult);
 
   Instruction *visitCallSite(CallSite CS);
   Instruction *tryOptimizeCall(CallInst *CI);
   bool transformConstExprCastCall(CallSite CS);
   Instruction *transformCallThroughTrampoline(CallSite CS,
                                               IntrinsicInst *Tramp);
-  Instruction *transformZExtICmp(ICmpInst *ICI, Instruction &CI,
-                                 bool DoXform = true);
+
+  /// Transform (zext icmp) to bitwise / integer operations in order to
+  /// eliminate it.
+  ///
+  /// \param ICI The icmp of the (zext icmp) pair we are interested in.
+  /// \parem CI The zext of the (zext icmp) pair we are interested in.
+  /// \param DoTransform Pass false to just test whether the given (zext icmp)
+  /// would be transformed. Pass true to actually perform the transformation.
+  ///
+  /// \return null if the transformation cannot be performed. If the
+  /// transformation can be performed the new instruction that replaces the
+  /// (zext icmp) pair will be returned (if \p DoTransform is false the
+  /// unmodified \p ICI will be returned in this case).
+  Instruction *transformZExtICmp(ICmpInst *ICI, ZExtInst &CI,
+                                 bool DoTransform = true);
+
   Instruction *transformSExtICmp(ICmpInst *ICI, Instruction &CI);
   bool WillNotOverflowSignedAdd(Value *LHS, Value *RHS, Instruction &CxtI);
   bool WillNotOverflowSignedSub(Value *LHS, Value *RHS, Instruction &CxtI);
@@ -344,6 +390,20 @@ private:
   Value *EmitGEPOffset(User *GEP);
   Instruction *scalarizePHI(ExtractElementInst &EI, PHINode *PN);
   Value *EvaluateInDifferentElementOrder(Value *V, ArrayRef<int> Mask);
+  Instruction *foldCastedBitwiseLogic(BinaryOperator &I);
+
+  /// Determine if a pair of casts can be replaced by a single cast.
+  ///
+  /// \param CI1 The first of a pair of casts.
+  /// \param CI2 The second of a pair of casts.
+  ///
+  /// \return 0 if the cast pair cannot be eliminated, otherwise returns an
+  /// Instruction::CastOps value for a cast that can replace the pair, casting
+  /// CI1->getSrcTy() to CI2->getDstTy().
+  ///
+  /// \see CastInst::isEliminableCastPair
+  Instruction::CastOps isEliminableCastPair(const CastInst *CI1,
+                                            const CastInst *CI2);
 
 public:
   /// \brief Inserts an instruction \p New before instruction \p Old
@@ -354,7 +414,7 @@ public:
     assert(New && !New->getParent() &&
            "New instruction already inserted into a basic block!");
     BasicBlock *BB = Old.getParent();
-    BB->getInstList().insert(&Old, New); // Insert inst
+    BB->getInstList().insert(Old.getIterator(), New); // Insert inst
     Worklist.Add(New);
     return New;
   }
@@ -368,10 +428,10 @@ public:
   /// \brief A combiner-aware RAUW-like routine.
   ///
   /// This method is to be used when an instruction is found to be dead,
-  /// replacable with another preexisting expression. Here we add all uses of
+  /// replaceable with another preexisting expression. Here we add all uses of
   /// I to the worklist, replace all uses of I with the new value, then return
   /// I, so that the inst combiner will know that I was modified.
-  Instruction *ReplaceInstUsesWith(Instruction &I, Value *V) {
+  Instruction *replaceInstUsesWith(Instruction &I, Value *V) {
     // If there are no uses to replace, then we return nullptr to indicate that
     // no changes were made to the program.
     if (I.use_empty()) return nullptr;
@@ -391,14 +451,10 @@ public:
   }
 
   /// Creates a result tuple for an overflow intrinsic \p II with a given
-  /// \p Result and a constant \p Overflow value. If \p ReUseName is true the
-  /// \p Result's name is taken from \p II.
+  /// \p Result and a constant \p Overflow value.
   Instruction *CreateOverflowTuple(IntrinsicInst *II, Value *Result,
-                                   bool Overflow, bool ReUseName = true) {
-    if (ReUseName)
-      Result->takeName(II);
-    Constant *V[] = {UndefValue::get(Result->getType()),
-                     Overflow ? Builder->getTrue() : Builder->getFalse()};
+                                   Constant *Overflow) {
+    Constant *V[] = {UndefValue::get(Result->getType()), Overflow};
     StructType *ST = cast<StructType>(II->getType());
     Constant *Struct = ConstantStruct::get(ST, V);
     return InsertValueInst::Create(Struct, Result, 0);
@@ -409,16 +465,16 @@ public:
   /// When dealing with an instruction that has side effects or produces a void
   /// value, we can't rely on DCE to delete the instruction. Instead, visit
   /// methods should return the value returned by this function.
-  Instruction *EraseInstFromFunction(Instruction &I) {
+  Instruction *eraseInstFromFunction(Instruction &I) {
     DEBUG(dbgs() << "IC: ERASE " << I << '\n');
 
     assert(I.use_empty() && "Cannot erase instruction that is used!");
     // Make sure that we reprocess all operands now that we reduced their
     // use counts.
     if (I.getNumOperands() < 8) {
-      for (User::op_iterator i = I.op_begin(), e = I.op_end(); i != e; ++i)
-        if (Instruction *Op = dyn_cast<Instruction>(*i))
-          Worklist.Add(Op);
+      for (Use &Operand : I.operands())
+        if (auto *Inst = dyn_cast<Instruction>(Operand))
+          Worklist.Add(Inst);
     }
     Worklist.Remove(&I);
     I.eraseFromParent();
@@ -473,12 +529,12 @@ private:
   Value *SimplifyDemandedUseBits(Value *V, APInt DemandedMask, APInt &KnownZero,
                                  APInt &KnownOne, unsigned Depth,
                                  Instruction *CxtI);
-  bool SimplifyDemandedBits(Use &U, APInt DemandedMask, APInt &KnownZero,
+  bool SimplifyDemandedBits(Use &U, const APInt &DemandedMask, APInt &KnownZero,
                             APInt &KnownOne, unsigned Depth = 0);
   /// Helper routine of SimplifyDemandedUseBits. It tries to simplify demanded
   /// bit for "r1 = shr x, c1; r2 = shl r1, c2" instruction sequence.
   Value *SimplifyShrShlDemandedBits(Instruction *Lsr, Instruction *Sftl,
-                                    APInt DemandedMask, APInt &KnownZero,
+                                    const APInt &DemandedMask, APInt &KnownZero,
                                     APInt &KnownOne);
 
   /// \brief Tries to simplify operands to an integer instruction based on its
@@ -504,6 +560,32 @@ private:
   Instruction *FoldPHIArgBinOpIntoPHI(PHINode &PN);
   Instruction *FoldPHIArgGEPIntoPHI(PHINode &PN);
   Instruction *FoldPHIArgLoadIntoPHI(PHINode &PN);
+  Instruction *FoldPHIArgZextsIntoPHI(PHINode &PN);
+
+  Instruction *foldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
+                           ICmpInst::Predicate Cond, Instruction &I);
+  Instruction *foldAllocaCmp(ICmpInst &ICI, AllocaInst *Alloca, Value *Other);
+  Instruction *foldCmpLoadFromIndexedGlobal(GetElementPtrInst *GEP,
+                                            GlobalVariable *GV, CmpInst &ICI,
+                                            ConstantInt *AndCst = nullptr);
+  Instruction *foldFCmpIntToFPConst(FCmpInst &I, Instruction *LHSI,
+                                    Constant *RHSC);
+  Instruction *foldICmpDivConst(ICmpInst &ICI, BinaryOperator *DivI,
+                                ConstantInt *DivRHS);
+  Instruction *foldICmpShrConst(ICmpInst &ICI, BinaryOperator *DivI,
+                                ConstantInt *DivRHS);
+  Instruction *foldICmpCstShrConst(ICmpInst &I, Value *Op, Value *A,
+                                   ConstantInt *CI1, ConstantInt *CI2);
+  Instruction *foldICmpCstShlConst(ICmpInst &I, Value *Op, Value *A,
+                                   ConstantInt *CI1, ConstantInt *CI2);
+  Instruction *foldICmpAddOpConst(Instruction &ICI, Value *X, ConstantInt *CI,
+                                  ICmpInst::Predicate Pred);
+  Instruction *foldICmpWithCastAndCast(ICmpInst &ICI);
+  Instruction *foldICmpWithConstant(ICmpInst &ICI, Instruction *LHS,
+                                    ConstantInt *RHS);
+  Instruction *foldICmpEqualityWithConstant(ICmpInst &ICI, Instruction *LHS,
+                                            ConstantInt *RHS);
+  Instruction *foldICmpIntrinsicWithConstant(ICmpInst &ICI);
 
   Instruction *OptAndOp(Instruction *Op, ConstantInt *OpRHS,
                         ConstantInt *AndRHS, BinaryOperator &TheAnd);

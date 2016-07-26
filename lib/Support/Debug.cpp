@@ -28,6 +28,7 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/circular_raw_ostream.h"
+#include "llvm/Support/raw_ostream.h"
 
 #undef isCurrentDebugType
 #undef setCurrentDebugType
@@ -48,9 +49,9 @@ static ManagedStatic<std::vector<std::string>> CurrentDebugType;
 bool isCurrentDebugType(const char *DebugType) {
   if (CurrentDebugType->empty())
     return true;
-  // see if DebugType is in list. Note: do not use find() as that forces us to
+  // See if DebugType is in list. Note: do not use find() as that forces us to
   // unnecessarily create an std::string instance.
-  for (auto d : *CurrentDebugType) {
+  for (auto &d : *CurrentDebugType) {
     if (d == DebugType)
       return true;
   }
@@ -94,7 +95,10 @@ struct DebugOnlyOpt {
     if (Val.empty())
       return;
     DebugFlag = true;
-    CurrentDebugType->push_back(Val);
+    SmallVector<StringRef,8> dbgTypes;
+    StringRef(Val).split(dbgTypes, ',', -1, false);
+    for (auto dbgType : dbgTypes)
+      CurrentDebugType->push_back(dbgType);
   }
 };
 
@@ -103,19 +107,18 @@ struct DebugOnlyOpt {
 static DebugOnlyOpt DebugOnlyOptLoc;
 
 static cl::opt<DebugOnlyOpt, true, cl::parser<std::string> >
-DebugOnly("debug-only", cl::desc("Enable a specific type of debug output"),
+DebugOnly("debug-only", cl::desc("Enable a specific type of debug output (comma separated list of types)"),
           cl::Hidden, cl::ZeroOrMore, cl::value_desc("debug string"),
           cl::location(DebugOnlyOptLoc), cl::ValueRequired);
-
 // Signal handlers - dump debug output on termination.
 static void debug_user_sig_handler(void *Cookie) {
   // This is a bit sneaky.  Since this is under #ifndef NDEBUG, we
   // know that debug mode is enabled and dbgs() really is a
   // circular_raw_ostream.  If NDEBUG is defined, then dbgs() ==
   // errs() but this will never be invoked.
-  llvm::circular_raw_ostream *dbgout =
-    static_cast<llvm::circular_raw_ostream *>(&llvm::dbgs());
-  dbgout->flushBufferWithBanner();
+  llvm::circular_raw_ostream &dbgout =
+      static_cast<circular_raw_ostream &>(llvm::dbgs());
+  dbgout.flushBufferWithBanner();
 }
 
 /// dbgs - Return a circular-buffered debug stream.

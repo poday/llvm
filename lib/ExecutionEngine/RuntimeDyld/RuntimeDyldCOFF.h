@@ -15,7 +15,6 @@
 #define LLVM_RUNTIME_DYLD_COFF_H
 
 #include "RuntimeDyldImpl.h"
-#include "llvm/ADT/DenseMap.h"
 
 #define DEBUG_TYPE "dyld"
 
@@ -31,11 +30,15 @@ public:
   std::unique_ptr<RuntimeDyld::LoadedObjectInfo>
   loadObject(const object::ObjectFile &Obj) override;
   bool isCompatibleFile(const object::ObjectFile &Obj) const override;
-  static std::unique_ptr<RuntimeDyldCOFF> create(Triple::ArchType Arch,
-                                                 RTDyldMemoryManager *MM);
+
+  static std::unique_ptr<RuntimeDyldCOFF>
+  create(Triple::ArchType Arch, RuntimeDyld::MemoryManager &MemMgr,
+         RuntimeDyld::SymbolResolver &Resolver);
 
 protected:
-  RuntimeDyldCOFF(RTDyldMemoryManager *MM) : RuntimeDyldImpl(MM) {}
+  RuntimeDyldCOFF(RuntimeDyld::MemoryManager &MemMgr,
+                  RuntimeDyld::SymbolResolver &Resolver)
+    : RuntimeDyldImpl(MemMgr, Resolver) {}
   uint64_t getSymbolOffset(const SymbolRef &Sym);
 };
 

@@ -15,13 +15,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/SpecialCaseList.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Regex.h"
-#include "llvm/Support/raw_ostream.h"
 #include <string>
 #include <system_error>
 #include <utility>
@@ -52,7 +50,7 @@ std::unique_ptr<SpecialCaseList>
 SpecialCaseList::create(const std::vector<std::string> &Paths,
                         std::string &Error) {
   std::unique_ptr<SpecialCaseList> SCL(new SpecialCaseList());
-  for (auto Path : Paths) {
+  for (const auto &Path : Paths) {
     ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
         MemoryBuffer::getFile(Path);
     if (std::error_code EC = FileOrErr.getError()) {

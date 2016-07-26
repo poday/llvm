@@ -11,7 +11,6 @@
 #define LLVM_LIB_EXECUTIONENGINE_RUNTIMEDYLD_RUNTIMEDYLDCHECKERIMPL_H
 
 #include "RuntimeDyldImpl.h"
-#include <set>
 
 namespace llvm {
 
@@ -19,6 +18,7 @@ class RuntimeDyldCheckerImpl {
   friend class RuntimeDyldChecker;
   friend class RuntimeDyldImpl;
   friend class RuntimeDyldCheckerExprEval;
+  friend class RuntimeDyldELF;
 
 public:
   RuntimeDyldCheckerImpl(RuntimeDyld &RTDyld, MCDisassembler *Disassembler,
